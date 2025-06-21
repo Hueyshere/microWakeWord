@@ -61,7 +61,8 @@ if [[ "$(uname)" == "Darwin" ]]; then
 else
   git clone https://github.com/rhasspy/piper-sample-generator
 fi
-pip install -e ./piper-sample-generator
+# pip install -e ./piper-sample-generator
+# 安装 torch 等 mac 注意按照 discussion 修改 torch weight only = False  在 generate sample.py 中
 ```
 
 ### 4. 准备数据

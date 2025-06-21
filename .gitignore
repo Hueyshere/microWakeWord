@@ -154,3 +154,11 @@ training_parameters.yaml
 *.flac
 *.wav
 *.mp3
+
+audioset/
+audioset_16k/
+generated_samples/
+mit_rirs/
+fma/
+fma_16k/
+negative_datasets/
