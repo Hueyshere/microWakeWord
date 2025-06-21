@@ -1,57 +1,98 @@
-![microWakeWord logo](etc/logo.png)
+# microWakeWord — 自定义唤醒词快速训练套件
 
-microWakeWord is an open-source wakeword library for detecting custom wake words on low power devices. It produces models that are suitable for using [TensorFlow Lite for Microcontrollers](https://www.tensorflow.org/lite/microcontrollers). The models are suitable for real-world usage with low false accept and false reject rates.
+> 针对 macOS (Apple Silicon) 与 Linux (x86_64/NVIDIA GPU) 自用整理  
 
-**microWakeword is currently available as an early release. Training new models is intended for advanced users. Training a model that works well is still very difficult, as it typically requires experimentation with hyperparameters and sample generation settings. Please share any insights you find for training a good model!**
+## 目录结构约定
 
-## Detection Process
+```
+.
+├── README.md
+├── prepare_data.py # 第一次运行：准备数据
+├── train_wakeword.py # 训练/量化/导出
+├── microWakeWord/ # 克隆后本地可编辑安装
+├── piper-sample-generator/ # 同上
+└── 其余下载数据/模型/训练结果 ...
+```
 
-We detect the wake word in two stages. Raw audio data is processed into 40 spectrogram features every 10 ms. The streaming inference model uses the newest slice of feature data as input and returns a probability that the wake word is said. If the model consistently predicts the wake word over multiple windows, then we predict that the wake word has been said.
+整个项目只需保存这一文件夹即可；以后 **无需联网也不用再装依赖**——  
+Python 虚拟环境只要不删除，就不会重复拉包。
 
-The first stage processes the raw monochannel audio data at a sample rate of 16 kHz via the [micro_speech preprocessor](https://github.com/tensorflow/tflite-micro/tree/main/tensorflow/lite/micro/examples/micro_speech). The preprocessor generates 40 features over 30 ms (the window duration) of audio data. The preprocessor generates these features every 10 ms (the stride duration), so the first 20 ms of audio data is part of the previous window. This process is similar to calculating a Mel spectrogram for the audio data, but it includes noise supression and automatic gain control. This makes it suitable for devices with limited processing power. See the linked TFLite Micro example for full details on how the audio is processed.
+## 快速开始
 
-The streaming model performs inferences every 30 ms, where the initial convolution layer strides over three 10 ms slices of audio. The model is a neural network using [MixConv](https://arxiv.org/abs/1907.09595) mixed depthwise convolutions suitable for streaming. Streaming and training the model uses heavily modified open-sourced code from [Google Research](https://github.com/google-research/google-research/tree/master/kws_streaming) found in the paper [Streaming Keyword Spotting on Mobile Devices](https://arxiv.org/pdf/2005.06720.pdf) by Rykabov, Kononenko, Subrahmanya, Visontai, and Laurenzo.
+### 1. 创建并激活虚拟环境  
 
-### Training Process
-- We augment the spectrograms in several possible ways during training:
-    - [SpecAugment](https://arxiv.org/pdf/1904.08779.pdf) masks time and frequency features
-- The best weights are chosen as a two-step process:
-    1. The top priority is minimizing a specific metric like the false accepts per hour on ambient background noise first.
-    2. If the specified minimization target metric is met, then we maximize a different specified metric like accuracy.
-- Validation and test sets are split into two portions:
-    1. The ``validation`` and ``testing`` sets include the positive and negative generated samples.
-    2. The ``validation_ambient`` and ``testing_ambient`` sets are all negative samples representing real-world background sounds; e.g., music, random household noises, and general speech/conversations.
-- Generated spectrograms are stored as [Ragged Mmap](https://github.com/hristo-vrigazov/mmap.ninja/tree/master) folders for quick loading from the disk while training.
-- Each feature set is configured with a ``sampling_weight`` and ``penalty_weight``. The ``sampling_weight`` parameter controls oversampling and ``penalty_weight`` controls the weight of incorrect predictions.
-- Class weights are also adjustable with the ``positive_class_weight`` and ``negative_class_weight`` parameters. It is useful to increase the ``negative_class_weight`` to reduce the amount of false acceptances.
-- We train the model in a non-streaming mode; i.e., it trains on the entire spectrogram. When finished, this is converted to a streaming model that updates on only the newest spectrogram features.
-    - Not padding the convolutions ensures the non-streaming and streaming models have nearly identical prediction behaviors.
-    - We estimate the false accepts per hour metric during training by splitting long-duration ambient clips into appropriate-sized spectrograms with a 100 ms stride to simulate the streaming model. This is not a perfect estimate of the streaming model's real-world false accepts per hour, but it is sufficient for determining the best weights.
-- We should generate spectrogram features over a longer time period than needed for training the model. The preprocessor model applies PCAN and noise reduction, and generating features over a longer time period results in models that are better to generalize.
-- We quantize the streaming models to increase performance on low-power devices. This has a small performance penalty that varies from model to model, but there is typically no reduction in accuracy.
+```bash
+conda create -n microwakeword python=3.10
+conda activate microwakeword
+```
 
+### 2. 一次性安装依赖（离线可复用）
 
-## Model Training Process
+**macOS:**
 
-We generate samples using [Piper sample generator](https://github.com/rhasspy/piper-sample-generator).
+```bash
+pip install 'git+https://github.com/puddly/pymicro-features@puddly/minimum-cpp-version'
+```
 
-The generated samples are augmented before or during training to increase variability. There are pre-generated spectrogram features for various negative datasets available on [Hugging Face](https://huggingface.co/datasets/kahrendt/microwakeword).
+**Linux:**
 
-Please see the ``basic_training_notebook.ipynb`` notebook to see how a model is trained. This notebook will produce a model, but it will most likely not be usable! Training a usable model requires a lot of experimentation, and that notebook is meant to serve only as a starting point for advanced users.
+```bash
+pip install 'git+https://github.com/kahrendt/pymicro-features'
+```
 
-## Models
+**通用包（两端都要装）：**
 
-See https://github.com/esphome/micro-wake-word-models to download the currently available models.
+```bash
+pip install \
+  'git+https://github.com/whatsnowplaying/audio-metadata@d4ebb238e6a401bb1a5aaaac60c9e2b3cb30929f' \
+  torch torchaudio piper-phonemize-cross==1.2.1 \
+  datasets soundfile tqdm scipy mmap-ninja
+```
 
-## Acknowledgements
+### 3. 克隆并本地可编辑安装（只需一次）
 
-I am very thankful for many people's support to help improve this! Thank you, in particular, to the following individuals and organizations for providing feedback, collaboration, and developmental support:
+```bash
+git clone https://github.com/kahrendt/microWakeWord
+pip install -e ./microWakeWord
 
-  - [balloob](https://github.com/balloob)
-  - [dscripka](https://github.com/dscripka)
-  - [jesserockz](https://github.com/jesserockz)
-  - [kbx81](https://github.com/kbx81)
-  - [synesthesiam](https://github.com/synesthesiam)
-  - [ESPHome](https://github.com/esphome)
-  - [Nabu Casa](https://github.com/NabuCasa)
-  - [Open Home Foundation](https://www.openhomefoundation.org/)
+# macOS 用支持 MPS 分支；Linux 用主仓库
+if [[ "$(uname)" == "Darwin" ]]; then
+  git clone -b mps-support https://github.com/kahrendt/piper-sample-generator
+else
+  git clone https://github.com/rhasspy/piper-sample-generator
+fi
+pip install -e ./piper-sample-generator
+```
+
+### 4. 准备数据
+
+TODO: 中文暂不支持 需要修改代码
+```bash
+python prepare_data.py \
+  --target_word "小陈啊" \
+  --language zh_CN          # 可改 en_US / fr_FR / de_DE ...
+```
+
+首次执行会下载 & 生成：
+
+*   Piper TTS 模型并合成 1 000 条唤醒词；
+*   MIT RIR、AudioSet 子集、FMA 等背景噪声并转 16 kHz；
+*   增广后生成训练 / 验证 / 测试 spectrogram Ragged Mmap；
+*   负样本数据集 (speech / dinner_party / no_speech …)；
+*   自动写出 training_parameters.yaml。
+
+### 5. 训练
+
+```bash
+python train_wakeword.py
+```
+
+典型耗时（M1 Pro，batch 128）≈ 13 min。
+
+最终模型位于：
+
+```bash
+trained_models/wakeword/tflite_stream_state_internal_quant/stream_state_internal_quant.tflite
+```
+
+可直接嵌入移动端或微控制器。
